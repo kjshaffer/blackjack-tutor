@@ -1,0 +1,53 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  hashedPassword String
+  createdAt      DateTime  @default(now())
+  sessions       Session[]
+  mastery        Mastery[]
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  startedAt    DateTime @default(now())
+  endedAt      DateTime?
+  totalHands   Int      @default(0)
+  correctCount Int      @default(0)
+  hands        Hand[]
+}
+
+model Hand {
+  id              String   @id @default(cuid())
+  sessionId       String
+  session         Session  @relation(fields: [sessionId], references: [id])
+  playerCards     String[] 
+  dealerUpcard    String
+  handType        String   // "hard", "soft", or "pair"
+  userAction      String   // "hit", "stand", "double", "split"
+  correctAction   String
+  isCorrect       Boolean
+  llmExplanation  String?
+  createdAt       DateTime @default(now())
+}
+
+model Mastery {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  component   String   // e.g. "hard", "soft", "pair"
+  attempts    Int      @default(0)
+  correct     Int      @default(0)
+  lastUpdated DateTime @default(now())
+
+  @@unique([userId, component])
+}
