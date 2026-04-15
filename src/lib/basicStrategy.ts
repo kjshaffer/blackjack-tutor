@@ -153,6 +153,9 @@ export function getCorrectAction(
   }
 
   if (handType === "soft" && softOther !== undefined) {
+    if (softOther === 10) {
+      return { action: "S", handType: "soft" }; // soft 21 = always stand
+    }
     action = SOFT[softOther]?.[dIdx] as Action ?? "H";
     return { action, handType: "soft" };
   }
@@ -170,7 +173,10 @@ export function generateHand(): {
   correctAction: Action;
   handType: HandType;
 } {
-  const playerCards: [Card, Card] = [randomCard(), randomCard()];
+  let playerCards: [Card, Card];
+  do {
+    playerCards = [randomCard(), randomCard()];
+  } while (cardValue(playerCards[0]) + cardValue(playerCards[1]) === 21);
   const dealerUpcard = randomCard();
   const { action, handType } = getCorrectAction(playerCards, dealerUpcard);
 

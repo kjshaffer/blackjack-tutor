@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import PlayingCard from "@/components/PlayingCard";
 import {
   generateHand,
@@ -22,6 +24,9 @@ type HandResult = {
 };
 
 export default function PracticePage() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
+
   const [playerCards, setPlayerCards] = useState<[Card, Card] | null>(null);
   const [dealerUpcard, setDealerUpcard] = useState<Card | null>(null);
   const [correctAction, setCorrectAction] = useState<Action | null>(null);
@@ -33,8 +38,23 @@ export default function PracticePage() {
   } | null>(null);
   const [history, setHistory] = useState<HandResult[]>([]);
   const [started, setStarted] = useState(false);
+  const [practiceSessionId, setPracticeSessionId] = useState<string | null>(null);
 
-  const dealNewHand = useCallback(() => {
+  const startSession = useCallback(async () => {
+    if (!session?.user) return;
+    try {
+      const res = await fetch("/api/sessions", { method: "POST" });
+      const data = await res.json();
+      setPracticeSessionId(data.id);
+    } catch (err) {
+      console.error("Failed to create session:", err);
+    }
+  }, [session]);
+
+  const dealNewHand = useCallback(async () => {
+    if (!practiceSessionId && session?.user) {
+      await startSession();
+    }
     const hand = generateHand();
     setPlayerCards(hand.playerCards);
     setDealerUpcard(hand.dealerUpcard);
@@ -42,10 +62,10 @@ export default function PracticePage() {
     setHandType(hand.handType);
     setFeedback(null);
     setStarted(true);
-  }, []);
+  }, [practiceSessionId, session, startSession]);
 
   const handleAction = useCallback(
-    (action: Action) => {
+    async (action: Action) => {
       if (!correctAction || !playerCards || !dealerUpcard || !handType) return;
 
       const isCorrect = action === correctAction;
@@ -60,27 +80,66 @@ export default function PracticePage() {
 
       setFeedback({ isCorrect, userAction: action, correctAction });
       setHistory((prev) => [result, ...prev]);
+
+      // Save to database if logged in
+      if (practiceSessionId) {
+        try {
+          await fetch("/api/hands", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId: practiceSessionId,
+              playerCards: playerCards.map((c) => `${c.rank}${c.suit}`),
+              dealerUpcard: `${dealerUpcard.rank}${dealerUpcard.suit}`,
+              handType,
+              userAction: action,
+              correctAction,
+              isCorrect,
+            }),
+          });
+        } catch (err) {
+          console.error("Failed to save hand:", err);
+        }
+      }
     },
-    [correctAction, playerCards, dealerUpcard, handType]
+    [correctAction, playerCards, dealerUpcard, handType, practiceSessionId]
   );
 
   const totalHands = history.length;
   const correctCount = history.filter((h) => h.isCorrect).length;
   const accuracy = totalHands > 0 ? Math.round((correctCount / totalHands) * 100) : 0;
-
   const availableActions = playerCards ? getAvailableActions(playerCards) : [];
+
+  // Redirect to login if not authenticated
+  if (status === "loading") {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+        <div className="text-gray-400">Loading...</div>
+      </div>
+    );
+  }
+
+  if (status === "unauthenticated") {
+    router.push("/login");
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
       <div className="max-w-2xl mx-auto px-4 py-8">
         {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold tracking-tight mb-1">
-            Blackjack Strategy Trainer
-          </h1>
-          <p className="text-gray-400 text-sm">
-            Learn basic strategy through practice
-          </p>
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">
+              Blackjack Strategy Trainer
+            </h1>
+            <p className="text-gray-400 text-sm">
+              Learn basic strategy through practice
+            </p>
+          </div>
+          <div className="text-right text-sm text-gray-400">
+            {session?.user?.email}
+          </div>
         </div>
 
         {/* Score Bar */}
