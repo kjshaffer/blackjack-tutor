@@ -13,6 +13,7 @@ import {
   type Action,
   type HandType,
 } from "@/lib/basicStrategy";
+import { generateAdaptiveHand } from "@/lib/adaptiveStrategy";
 
 type HandResult = {
   playerCards: [Card, Card];
@@ -36,9 +37,26 @@ export default function PracticePage() {
     userAction: Action;
     correctAction: Action;
   } | null>(null);
+  const [explanation, setExplanation] = useState<string | null>(null);
+  const [loadingExplanation, setLoadingExplanation] = useState(false);
   const [history, setHistory] = useState<HandResult[]>([]);
   const [started, setStarted] = useState(false);
   const [practiceSessionId, setPracticeSessionId] = useState<string | null>(null);
+  const [mastery, setMastery] = useState<Record<string, { attempts: number; correct: number; accuracy: number }>>({});
+
+  const fetchMastery = useCallback(async () => {
+    try {
+      const res = await fetch("/api/mastery");
+      if (res.ok) {
+        const data = await res.json();
+        setMastery(data);
+        return data;
+      }
+    } catch (err) {
+      console.error("Failed to fetch mastery:", err);
+    }
+    return {};
+  }, []);
 
   const startSession = useCallback(async () => {
     if (!session?.user) return;
@@ -46,23 +64,31 @@ export default function PracticePage() {
       const res = await fetch("/api/sessions", { method: "POST" });
       const data = await res.json();
       setPracticeSessionId(data.id);
+      return data.id;
     } catch (err) {
       console.error("Failed to create session:", err);
     }
   }, [session]);
 
   const dealNewHand = useCallback(async () => {
-    if (!practiceSessionId && session?.user) {
-      await startSession();
+    let sessionId = practiceSessionId;
+    if (!sessionId && session?.user) {
+      sessionId = await startSession();
+      await fetchMastery();
     }
-    const hand = generateHand();
+    // Use adaptive selection if we have mastery data, otherwise random
+    const hand = Object.keys(mastery).length > 0
+      ? generateAdaptiveHand(mastery)
+      : generateHand();
     setPlayerCards(hand.playerCards);
     setDealerUpcard(hand.dealerUpcard);
     setCorrectAction(hand.correctAction);
     setHandType(hand.handType);
     setFeedback(null);
+    setExplanation(null);
+    setLoadingExplanation(false);
     setStarted(true);
-  }, [practiceSessionId, session, startSession]);
+  }, [practiceSessionId, session, startSession, fetchMastery, mastery]);
 
   const handleAction = useCallback(
     async (action: Action) => {
@@ -81,28 +107,62 @@ export default function PracticePage() {
       setFeedback({ isCorrect, userAction: action, correctAction });
       setHistory((prev) => [result, ...prev]);
 
-      // Save to database if logged in
+      const playerCardStrings = playerCards.map((c) => `${c.rank}${c.suit}`);
+      const dealerUpcardString = `${dealerUpcard.rank}${dealerUpcard.suit}`;
+
+      // Save to database
+      let handId: string | null = null;
       if (practiceSessionId) {
         try {
-          await fetch("/api/hands", {
+          const res = await fetch("/api/hands", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               sessionId: practiceSessionId,
-              playerCards: playerCards.map((c) => `${c.rank}${c.suit}`),
-              dealerUpcard: `${dealerUpcard.rank}${dealerUpcard.suit}`,
+              playerCards: playerCardStrings,
+              dealerUpcard: dealerUpcardString,
               handType,
               userAction: action,
               correctAction,
               isCorrect,
             }),
           });
+          const data = await res.json();
+          handId = data.id;
         } catch (err) {
           console.error("Failed to save hand:", err);
         }
       }
+
+      // Request LLM explanation if incorrect
+      if (!isCorrect) {
+        setLoadingExplanation(true);
+        try {
+          const res = await fetch("/api/explain", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              handId,
+              playerCards: playerCardStrings,
+              dealerUpcard: dealerUpcardString,
+              userAction: action,
+              correctAction,
+              handType,
+            }),
+          });
+          const data = await res.json();
+          setExplanation(data.explanation);
+        } catch (err) {
+          console.error("Failed to get explanation:", err);
+          setExplanation("Could not load explanation.");
+        }
+        setLoadingExplanation(false);
+      }
+
+      // Refresh mastery data for adaptive selection
+      fetchMastery();
     },
-    [correctAction, playerCards, dealerUpcard, handType, practiceSessionId]
+    [correctAction, playerCards, dealerUpcard, handType, practiceSessionId, fetchMastery]
   );
 
   const totalHands = history.length;
@@ -243,6 +303,23 @@ export default function PracticePage() {
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* LLM Explanation */}
+              {feedback && !feedback.isCorrect && (
+                <div className="bg-gray-800/60 border border-gray-700 rounded-lg p-4 mb-6">
+                  <div className="text-xs uppercase tracking-widest text-yellow-500 mb-2">
+                    Why?
+                  </div>
+                  {loadingExplanation ? (
+                    <div className="flex items-center gap-2 text-gray-400">
+                      <div className="w-4 h-4 border-2 border-gray-500 border-t-yellow-500 rounded-full animate-spin" />
+                      Thinking...
+                    </div>
+                  ) : explanation ? (
+                    <p className="text-gray-300 leading-relaxed">{explanation}</p>
+                  ) : null}
                 </div>
               )}
 
