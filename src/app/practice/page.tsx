@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import PlayingCard from "@/components/PlayingCard";
@@ -43,6 +43,7 @@ export default function PracticePage() {
   const [started, setStarted] = useState(false);
   const [practiceSessionId, setPracticeSessionId] = useState<string | null>(null);
   const [mastery, setMastery] = useState<Record<string, { attempts: number; correct: number; accuracy: number }>>({});
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchMastery = useCallback(async () => {
     try {
@@ -70,13 +71,39 @@ export default function PracticePage() {
     }
   }, [session]);
 
+  const pollForExplanation = useCallback((handId: string) => {
+    setLoadingExplanation(true);
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/explain/${handId}`);
+        const data = await res.json();
+
+        if (data.status === "complete") {
+          setExplanation(data.explanation);
+          setLoadingExplanation(false);
+          if (pollRef.current) clearInterval(pollRef.current);
+        }
+      } catch (err) {
+        console.error("Poll error:", err);
+      }
+    };
+
+    // Poll every second
+    pollRef.current = setInterval(poll, 1000);
+    // Also try immediately
+    poll();
+  }, []);
+
   const dealNewHand = useCallback(async () => {
+    // Clean up any existing poll
+    if (pollRef.current) clearInterval(pollRef.current);
+
     let sessionId = practiceSessionId;
     if (!sessionId && session?.user) {
       sessionId = await startSession();
       await fetchMastery();
     }
-    // Use adaptive selection if we have mastery data, otherwise random
     const hand = Object.keys(mastery).length > 0
       ? generateAdaptiveHand(mastery)
       : generateHand();
@@ -134,11 +161,10 @@ export default function PracticePage() {
         }
       }
 
-      // Request LLM explanation if incorrect
-      if (!isCorrect) {
-        setLoadingExplanation(true);
+      // Enqueue LLM explanation if incorrect
+      if (!isCorrect && handId) {
         try {
-          const res = await fetch("/api/explain", {
+          await fetch("/api/explain", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -150,19 +176,17 @@ export default function PracticePage() {
               handType,
             }),
           });
-          const data = await res.json();
-          setExplanation(data.explanation);
+          // Start polling for the explanation
+          pollForExplanation(handId);
         } catch (err) {
-          console.error("Failed to get explanation:", err);
-          setExplanation("Could not load explanation.");
+          console.error("Failed to enqueue explanation:", err);
         }
-        setLoadingExplanation(false);
       }
 
-      // Refresh mastery data for adaptive selection
+      // Refresh mastery data
       fetchMastery();
     },
-    [correctAction, playerCards, dealerUpcard, handType, practiceSessionId, fetchMastery]
+    [correctAction, playerCards, dealerUpcard, handType, practiceSessionId, fetchMastery, pollForExplanation]
   );
 
   const totalHands = history.length;
@@ -170,7 +194,6 @@ export default function PracticePage() {
   const accuracy = totalHands > 0 ? Math.round((correctCount / totalHands) * 100) : 0;
   const availableActions = playerCards ? getAvailableActions(playerCards) : [];
 
-  // Redirect to login if not authenticated
   if (status === "loading") {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
@@ -257,7 +280,6 @@ export default function PracticePage() {
                 </div>
               </div>
 
-              {/* Divider */}
               <div className="border-t border-emerald-700/50 my-6" />
 
               {/* Player Section */}
