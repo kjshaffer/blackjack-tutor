@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import PlayingCard from "@/components/PlayingCard";
@@ -44,6 +44,13 @@ export default function PracticePage() {
   const [practiceSessionId, setPracticeSessionId] = useState<string | null>(null);
   const [mastery, setMastery] = useState<Record<string, { attempts: number; correct: number; accuracy: number }>>({});
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Redirect if not logged in
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/login");
+    }
+  }, [status, router]);
 
   const fetchMastery = useCallback(async () => {
     try {
@@ -194,17 +201,12 @@ export default function PracticePage() {
   const accuracy = totalHands > 0 ? Math.round((correctCount / totalHands) * 100) : 0;
   const availableActions = playerCards ? getAvailableActions(playerCards) : [];
 
-  if (status === "loading") {
+  if (status === "loading" || status === "unauthenticated") {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
         <div className="text-gray-400">Loading...</div>
       </div>
     );
-  }
-
-  if (status === "unauthenticated") {
-    router.push("/login");
-    return null;
   }
 
   return (

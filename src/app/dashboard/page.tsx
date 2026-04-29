@@ -37,6 +37,12 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/login");
+    }
+  }, [status, router]);
+
+  useEffect(() => {
     async function fetchData() {
       try {
         const res = await fetch("/api/dashboard");
@@ -55,17 +61,12 @@ export default function DashboardPage() {
     }
   }, [status]);
 
-  if (status === "loading" || loading) {
+  if (status === "loading" || status === "unauthenticated" || loading) {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
         <div className="text-gray-400">Loading...</div>
       </div>
     );
-  }
-
-  if (status === "unauthenticated") {
-    router.push("/login");
-    return null;
   }
 
   if (!data || data.overall.totalHands === 0) {
@@ -91,17 +92,9 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-gray-950 text-white">
       <div className="max-w-4xl mx-auto px-4 py-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-            <p className="text-gray-400 text-sm">Your learning progress</p>
-          </div>
-          <Link
-            href="/practice"
-            className="bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-bold px-5 py-2 rounded-lg text-sm transition-colors"
-          >
-            Practice →
-          </Link>
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-gray-400 text-sm">Your learning progress</p>
         </div>
 
         {/* Overall Stats */}
@@ -143,7 +136,8 @@ export default function DashboardPage() {
                 <Tooltip
                   contentStyle={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px" }}
                   labelStyle={{ color: "#94a3b8" }}
-                  formatter={(value: number) => [`${value}%`, "Accuracy"]}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  formatter={((value: number) => [`${value}%`, "Accuracy"]) as any}
                   labelFormatter={(label) => `Hand ${label}`}
                 />
                 <Line
@@ -176,10 +170,8 @@ export default function DashboardPage() {
                 <Tooltip
                   contentStyle={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px" }}
                   labelStyle={{ color: "#94a3b8" }}
-                  formatter={(value: number, name: string, props: { payload: { attempts: number; correct: number } }) => [
-                    `${value}% (${props.payload.correct}/${props.payload.attempts})`,
-                    "Accuracy",
-                  ]}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  formatter={((value: number) => [`${value}%`, "Accuracy"]) as any}
                 />
                 <Bar dataKey="accuracy" radius={[6, 6, 0, 0]}>
                   {data.mastery.map((entry) => (
