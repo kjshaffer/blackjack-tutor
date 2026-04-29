@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/db";
-import { generateExplanation } from "@/lib/openai";
+import { explanationQueue } from "@/lib/queue";
 
 export async function POST(req: Request) {
   const session = await auth();
@@ -13,7 +12,9 @@ export async function POST(req: Request) {
     const { handId, playerCards, dealerUpcard, userAction, correctAction, handType } =
       await req.json();
 
-    const explanation = await generateExplanation({
+    // Enqueue the job instead of calling LLM directly
+    const job = await explanationQueue.add("generate-explanation", {
+      handId,
       playerCards,
       dealerUpcard,
       userAction,
@@ -21,19 +22,11 @@ export async function POST(req: Request) {
       handType,
     });
 
-    // Save the explanation to the hand record if we have a handId
-    if (handId) {
-      await prisma.hand.update({
-        where: { id: handId },
-        data: { llmExplanation: explanation },
-      });
-    }
-
-    return NextResponse.json({ explanation });
+    return NextResponse.json({ jobId: job.id, handId });
   } catch (error) {
-    console.error("Explanation error:", error);
+    console.error("Enqueue error:", error);
     return NextResponse.json(
-      { error: "Failed to generate explanation" },
+      { error: "Failed to enqueue explanation" },
       { status: 500 }
     );
   }
